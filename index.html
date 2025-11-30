@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Teste Moldura na Câmera - Vídeo MP4</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background: #0f172a;
+      color: #e5e7eb;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    h1 {
+      font-size: 1.2rem;
+      text-align: center;
+      margin: 0;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 420px;
+      background: #020617;
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.55);
+      border: 1px solid rgba(148,163,184,0.3);
+    }
+
+    .preview-wrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      background: #020617;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    video, canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    button {
+      padding: 10px 8px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #38bdf8;
+      color: #020617;
+      box-shadow: 0 8px 18px rgba(56,189,248,0.4);
+      transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.2s ease;
+    }
+
+    button.secondary {
+      background: #1e293b;
+      color: #e5e7eb;
+      box-shadow: none;
+      border: 1px solid rgba(148,163,184,0.4);
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    button:not(:disabled):active {
+      transform: translateY(1px) scale(0.99);
+      box-shadow: 0 4px 10px rgba(15,23,42,0.7);
+    }
+
+    #status {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      min-height: 1.2em;
+      color: #cbd5f5;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(56,189,248,0.15);
+      border: 1px solid rgba(56,189,248,0.6);
+      font-size: 0.7rem;
+      margin-top: 6px;
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34,197,94,0.35);
+    }
+
+    small {
+      display: block;
+      margin-top: 8px;
+      font-size: 0.7rem;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <h1>Moldura na Câmera – Teste Vídeo MP4</h1>
+
+  <div class="container">
+    <div class="preview-wrapper">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="photoCanvas"></canvas>
+      <!-- Troque 'moldura.png' pela imagem da sua moldura -->
+      <img id="overlay" src="moldura.png" alt="Moldura" />
+    </div>
+
+    <div class="buttons">
+      <button id="openCameraBtn">Abrir câmera</button>
+      <button id="takePhotoBtn" class="secondary" disabled>Tirar foto</button>
+      <button id="startVideoBtn" disabled>Gravar vídeo</button>
+      <button id="stopVideoBtn" class="secondary" disabled>Parar vídeo</button>
+    </div>
+
+    <p id="status"></p>
+    <div class="badge">
+      <span class="badge-dot"></span>
+      <span>Back‑end MP4 ligado no Railway</span>
+    </div>
+    <small>
+      Foto já sai com a moldura. No vídeo, por enquanto é só para testar a conversão para MP4 –
+      depois a gente encaixa essa lógica dentro do seu index oficial. 💛
+    </small>
+  </div>
+
+  <script>
+    // URL da sua API (Railway)
+    const API_URL = 'https://video-converter-api-production-bb8e.up.railway.app/convert';
+
+    const video = document.getElementById('video');
+    const photoCanvas = document.getElementById('photoCanvas');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+
+    const openCameraBtn = document.getElementById('openCameraBtn');
+    const takePhotoBtn = document.getElementById('takePhotoBtn');
+    const startVideoBtn = document.getElementById('startVideoBtn');
+    const stopVideoBtn = document.getElementById('stopVideoBtn');
+
+    let stream = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+
+    function setStatus(message) {
+      statusEl.textContent = message || '';
+    }
+
+    async function openCamera() {
+      try {
+        setStatus('Pedindo acesso à câmera...');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' },
+          audio: true
+        });
+        video.srcObject = stream;
+        photoCanvas.width = video.videoWidth || 720;
+        photoCanvas.height = video.videoHeight || 1280;
+        takePhotoBtn.disabled = false;
+        startVideoBtn.disabled = false;
+        setStatus('Câmera aberta. Você já pode tirar foto ou gravar vídeo.');
+      } catch (err) {
+        console.error(err);
+        setStatus('Não foi possível acessar a câmera. Confira as permissões.');
+      }
+    }
+
+    function takePhoto() {
+      if (!stream) return;
+      const ctx = photoCanvas.getContext('2d');
+      const width = video.videoWidth || photoCanvas.width;
+      const height = video.videoHeight || photoCanvas.height;
+
+      photoCanvas.width = width;
+      photoCanvas.height = height;
+
+      // Desenha a imagem da câmera
+      ctx.drawImage(video, 0, 0, width, height);
+
+      // Se a moldura tiver carregado, desenha por cima
+      if (overlay.complete && overlay.naturalWidth > 0) {
+        ctx.drawImage(overlay, 0, 0, width, height);
+      }
+
+      photoCanvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'foto-moldura.png';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setStatus('Foto com moldura baixada. Confira na sua galeria / arquivos.');
+      }, 'image/png');
+    }
+
+    function startVideoRecording() {
+      if (!stream) return;
+      recordedChunks = [];
+      try {
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      } catch (err) {
+        console.error(err);
+        setStatus('Seu navegador não suporta gravação de vídeo com esta configuração.');
+        return;
+      }
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (!recordedChunks.length) {
+          setStatus('Nenhum vídeo foi gravado.');
+          return;
+        }
+        setStatus('Enviando vídeo para converter em MP4...');
+        const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
+        const formData = new FormData();
+        formData.append('video', webmBlob, 'video.webm');
+
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            console.error('Erro na resposta da API', await response.text());
+            setStatus('Erro ao converter o vídeo. Tente novamente.');
+            return;
+          }
+
+          const mp4Blob = await response.blob();
+          const url = URL.createObjectURL(mp4Blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'video-moldura.mp4';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          setStatus('Vídeo MP4 baixado! Agora teste enviar pelo WhatsApp / Instagram.');
+        } catch (err) {
+          console.error(err);
+          setStatus('Erro de conexão com o servidor de conversão.');
+        }
+      };
+
+      mediaRecorder.start();
+      startVideoBtn.disabled = true;
+      stopVideoBtn.disabled = false;
+      setStatus('Gravando vídeo... clique em "Parar vídeo" quando terminar.');
+    }
+
+    function stopVideoRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        startVideoBtn.disabled = false;
+        stopVideoBtn.disabled = true;
+        setStatus('Finalizando gravação e preparando a conversão...');
+      }
+    }
+
+    openCameraBtn.addEventListener('click', openCamera);
+    takePhotoBtn.addEventListener('click', takePhoto);
+    startVideoBtn.addEventListener('click', startVideoRecording);
+    stopVideoBtn.addEventListener('click', stopVideoRecording);
+  </script>
+</body>
+</html>
